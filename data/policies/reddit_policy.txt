@@ -1,0 +1,36 @@
+REDDIT CONTENT POLICY - HATE SPEECH AND HARASSMENT
+
+Communities and users that incite violence or that promote hate based on identity or vulnerability will be banned.
+
+HATE SPEECH DEFINITION:
+Content that promotes, encourages, or facilitates hatred, harassment, or violence against individuals or groups based on race, ethnicity, religion, gender, sexual orientation, disability, or nationality is prohibited.
+
+HARASSMENT POLICY:
+Reddit prohibits behavior that constitutes harassment, including but not limited to:
+- Systematic or continued actions to torment or demean someone
+- Encouraging others to harass a specific person or group
+- Posting personal information (doxxing) with intent to harm
+- Unwelcome sexual content or commentary
+- Threats of violence or physical harm
+
+ENFORCEMENT ACTIONS:
+1. Content Removal: Violating posts and comments will be removed immediately
+2. User Warnings: First-time offenders receive official warnings
+3. Temporary Suspensions: 3-7 day suspensions for repeated violations
+4. Permanent Bans: Applied to users who repeatedly violate policy or engage in severe harassment
+5. Community Quarantine: Entire subreddits may be quarantined for systematic violations
+
+REPORTING MECHANISM:
+Users can report violations through the report button. All reports are reviewed by human moderators within 24 hours. Appeals can be submitted through Reddit's appeal system.
+
+CONTEXTUAL CONSIDERATIONS:
+- Satire and commentary are protected if they don't cross into direct harassment
+- Educational content discussing hate speech for academic purposes is allowed
+- Historical documentation is permitted with appropriate context
+- Community standards may apply additional restrictions beyond site-wide rules
+
+AUTOMATED DETECTION:
+Reddit employs machine learning systems to detect potential violations, but human review is required for final enforcement decisions. False positives are addressed through the appeal process.
+
+INTERNATIONAL COMPLIANCE:
+Reddit's policies comply with applicable laws in jurisdictions where the platform operates, including the EU Digital Services Act and local hate speech legislation.

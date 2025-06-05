@@ -1,0 +1,50 @@
+META PLATFORMS COMMUNITY STANDARDS - HATE SPEECH POLICY
+
+We define hate speech as a direct attack against people on the basis of protected characteristics: race, ethnicity, national origin, disability, religious affiliation, caste, sexual orientation, sex, gender identity, and serious disease.
+
+PROTECTED CHARACTERISTICS:
+Meta protects individuals and groups based on the following characteristics:
+- Race, ethnicity, national origin, religious affiliation
+- Sexual orientation, gender identity, sex
+- Disability, serious diseases, immigration status
+- Age (when content is degrading or dismissive)
+
+PROHIBITED CONTENT:
+Tier 1 Violations (Most Severe):
+- Dehumanizing speech comparing people to animals, insects, or objects
+- Statements of inferiority claiming protected groups are physically, mentally, or morally deficient
+- Expressions of contempt, disgust, or dismissal
+- Cursing at a person based on protected characteristics
+
+Tier 2 Violations:
+- Generalizations stating that protected groups have negative characteristics
+- Expressions of fearfulness about protected groups
+- Statements supporting segregation or exclusion
+
+ENFORCEMENT APPROACH:
+Meta uses a combination of automated systems and human reviewers to detect and remove violating content. Our systems are trained on millions of examples and continuously updated.
+
+Artificial Intelligence Detection:
+- Proactive detection identifies 95% of hate speech before users report it
+- Machine learning models analyze text, images, and video content
+- Context-aware algorithms consider cultural and linguistic nuances
+
+Human Review Process:
+- Complex cases are escalated to specialized teams
+- Cultural and regional expertise is applied to borderline content
+- Appeals are reviewed by different teams to ensure consistency
+
+CONSEQUENCES:
+1. Content Removal: Violating posts are removed and users are notified
+2. Account Restrictions: Temporary limitations on posting and sharing
+3. Account Suspension: 30-day suspensions for severe or repeated violations
+4. Permanent Removal: Accounts permanently disabled for extreme cases
+
+EXCEPTIONS AND CONTEXT:
+- Educational content about hate speech is allowed with proper context
+- News reporting on hate incidents is permitted
+- Artistic expression may be allowed if it doesn't promote harm
+- Self-referential content (people referring to themselves) has different standards
+
+APPEALS PROCESS:
+Users can appeal enforcement decisions through the platform's oversight system. Independent review boards evaluate complex cases and policy interpretations.
