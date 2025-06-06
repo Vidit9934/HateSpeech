@@ -1,0 +1,2 @@
+# HateSpeech
+detects hate speech
