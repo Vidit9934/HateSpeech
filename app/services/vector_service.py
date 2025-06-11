@@ -1,668 +1,663 @@
 """
-Vector store service using FAISS for efficient similarity search.
-Handles document indexing, storage, and retrieval operations.
+Vector store service for hate speech detection project.
+Provides high-level interface for document indexing and semantic search
+using the existing embedding service with Qdrant integration.
 """
 
 import logging
-import numpy as np
-import faiss
-import pickle
 import json
-from typing import List, Dict, Any, Optional, Tuple
+import os
+from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
-import time
 from datetime import datetime
+import time
+
+# Assuming your embedding service is in the same project
+from .embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
 
-class VectorStore:
+class VectorStoreService:
     """
-    FAISS-based vector store for efficient similarity search.
-    Supports document indexing, persistence, and retrieval.
+    High-level vector store service for policy document indexing and search.
+    Uses the embedding service with Qdrant for persistent vector storage.
     """
-    
+
     def __init__(
         self,
-        embedding_service,  # Changed from specific import to generic
-        storage_path: str = "./vector_db",
-        index_type: str = "flat"
+        embedding_service: Optional[EmbeddingService] = None,
+        collection_name: str = "policy_documents",
+        qdrant_host: str = "localhost",
+        qdrant_port: int = 6333,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
     ):
         """
-        Initialize the vector store.
-        
+        Initialize the vector store service.
+
         Args:
-            embedding_service: Service for creating embeddings
-            storage_path: Path to store the index and metadata
-            index_type: Type of FAISS index ('flat', 'ivf', 'hnsw')
+            embedding_service: Pre-initialized embedding service (optional)
+            collection_name: Name of the Qdrant collection for policy documents
+            qdrant_host: Qdrant server host
+            qdrant_port: Qdrant server port
+            model_name: Sentence transformer model name
         """
-        self.embedding_service = embedding_service
-        self.storage_path = Path(storage_path)
-        self.index_type = index_type
-        
-        # Initialize storage
-        self.storage_path.mkdir(parents=True, exist_ok=True)
-        
-        # FAISS index and metadata
-        self.index: Optional[faiss.Index] = None
-        self.documents: List[Dict[str, Any]] = []
-        self.document_metadata: Dict[int, Dict[str, Any]] = {}
-        
-        # Index configuration
-        self.embedding_dim = embedding_service.embedding_dim
-        self.is_trained = False
-        
-        logger.info(f"Initialized vector store at {storage_path}")
-        logger.info(f"Embedding dimension: {self.embedding_dim}")
-        logger.info(f"Index type: {index_type}")
-    
-    def _create_index(self, num_documents: int = 0) -> faiss.Index:
-        """
-        Create a FAISS index based on the specified type.
-        
-        Args:
-            num_documents: Estimated number of documents (for optimization)
-            
-        Returns:
-            FAISS index object
-        """
+        self.collection_name = collection_name
+        self.qdrant_host = qdrant_host
+        self.qdrant_port = qdrant_port
+        self.model_name = model_name
+
+        # Initialize embedding service if not provided
+        if embedding_service is None:
+            logger.info("Initializing new embedding service for vector store")
+            self.embedding_service = EmbeddingService(
+                model_name=model_name,
+                qdrant_host=qdrant_host,
+                qdrant_port=qdrant_port,
+                collection_name=collection_name,
+                use_qdrant=True,
+                cache_dir="./cache/embeddings",
+            )
+        else:
+            self.embedding_service = embedding_service
+            logger.info("Using provided embedding service")
+
+        # Track indexed documents
+        self.indexed_documents: Dict[str, Dict[str, Any]] = {}
+        self.is_ready = False
+
+        # Initialize
+        self._initialize()
+
+    def _initialize(self) -> None:
+        """Initialize the vector store and check connection."""
         try:
-            if self.index_type == "flat":
-                # Exact search using L2 distance
-                index = faiss.IndexFlatIP(self.embedding_dim)  # Inner product for cosine similarity
-                logger.info("Created flat index for exact search")
-                
-            elif self.index_type == "ivf":
-                # Inverted file index for faster approximate search
-                nlist = min(100, max(10, num_documents // 100))  # Number of clusters
-                quantizer = faiss.IndexFlatIP(self.embedding_dim)
-                index = faiss.IndexIVFFlat(quantizer, self.embedding_dim, nlist)
-                logger.info(f"Created IVF index with {nlist} clusters")
-                
-            elif self.index_type == "hnsw":
-                # Hierarchical Navigable Small World for very fast approximate search
-                M = 32  # Number of connections
-                index = faiss.IndexHNSWFlat(self.embedding_dim, M)
-                index.hnsw.efConstruction = 200
-                index.hnsw.efSearch = 100
-                logger.info(f"Created HNSW index with M={M}")
-                
+            # Test embedding service
+            test_embedding = self.embedding_service.embed_text("test")
+            logger.info(
+                f"Embedding service initialized successfully. Dimension: {len(test_embedding)}"
+            )
+
+            # Get collection info
+            collection_info = self.embedding_service.get_qdrant_collection_info()
+            if "error" not in collection_info:
+                logger.info(f"Connected to Qdrant collection: {collection_info}")
+                self.is_ready = True
             else:
-                raise ValueError(f"Unsupported index type: {self.index_type}")
-            
-            return index
-            
+                logger.error(
+                    f"Failed to connect to Qdrant: {collection_info.get('error')}"
+                )
+
         except Exception as e:
-            logger.error(f"Failed to create index: {str(e)}")
+            logger.error(f"Failed to initialize vector store: {str(e)}")
             raise
-    
-    def add_documents(
-        self, 
-        documents: List[Dict[str, Any]], 
-        batch_size: int = 100
-    ) -> None:
+
+    def load_policy_documents(self, documents_dir: str) -> List[Dict[str, Any]]:
         """
-        Add documents to the vector store.
-        
+        Load policy documents from directory.
+
         Args:
-            documents: List of document dictionaries with 'content' field
-            batch_size: Batch size for processing
+            documents_dir: Directory containing policy document files
+
+        Returns:
+            List of document dictionaries
         """
-        if not documents:
-            logger.warning("No documents provided to add")
-            return
-        
+        documents = []
+        documents_path = Path(documents_dir)
+
+        if not documents_path.exists():
+            raise FileNotFoundError(f"Documents directory not found: {documents_dir}")
+
+        # Supported file extensions
+        supported_extensions = {".txt", ".md", ".json"}
+
+        logger.info(f"Loading documents from: {documents_dir}")
+
+        for file_path in documents_path.iterdir():
+            if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
+                try:
+                    document = self._load_single_document(file_path)
+                    if document:
+                        documents.append(document)
+                        logger.info(f"Loaded document: {file_path.name}")
+                except Exception as e:
+                    logger.error(f"Failed to load document {file_path.name}: {str(e)}")
+
+        logger.info(f"Successfully loaded {len(documents)} policy documents")
+        return documents
+
+    def _load_single_document(self, file_path: Path) -> Optional[Dict[str, Any]]:
+        """
+        Load a single document file.
+
+        Args:
+            file_path: Path to the document file
+
+        Returns:
+            Document dictionary or None if failed
+        """
         try:
-            start_time = time.time()
-            logger.info(f"Adding {len(documents)} documents to vector store")
-            
-            # Create embeddings for documents
-            embedded_docs = self.embedding_service.embed_documents(documents)
-            
-            if not embedded_docs:
-                raise ValueError("No valid documents could be embedded")
-            
-            # Initialize index if not exists
-            if self.index is None:
-                self.index = self._create_index(len(embedded_docs))
-            
-            # Prepare embeddings for FAISS
-            embeddings = np.array([doc['embedding'] for doc in embedded_docs]).astype('float32')
-            
-            # Train index if needed (for IVF)
-            if self.index_type == "ivf" and not self.is_trained:
-                if len(embeddings) >= 100:  # Need sufficient data for training
-                    logger.info("Training IVF index...")
-                    self.index.train(embeddings)
-                    self.is_trained = True
-                else:
-                    logger.warning("Insufficient data for IVF training, using flat index")
-                    self.index = self._create_index()
-            
-            # Add to index
-            start_idx = len(self.documents)
-            self.index.add(embeddings)
-            
-            # Store documents and metadata
-            for i, doc in enumerate(embedded_docs):
-                doc_id = start_idx + i
-                
-                # Store document
-                self.documents.append({
-                    'id': doc_id,
-                    'content': doc.get('content', ''),
-                    'title': doc.get('title', f'Document {doc_id}'),
-                    'source': doc.get('source', 'unknown'),
-                    'added_at': datetime.utcnow().isoformat()
-                })
-                
-                # Store metadata
-                self.document_metadata[doc_id] = {
-                    'embedding_model': doc.get('embedding_model', self.embedding_service.model_name),
-                    'embedding_dim': doc.get('embedding_dim', self.embedding_dim),
-                    'content_length': len(doc.get('content', '')),
-                    'section': doc.get('section'),
-                    'policy_type': doc.get('policy_type')
-                }
-            
-            processing_time = time.time() - start_time
-            logger.info(f"Successfully added {len(embedded_docs)} documents in {processing_time:.2f}s")
-            logger.info(f"Total documents in store: {len(self.documents)}")
-            
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+
+            if not content:
+                logger.warning(f"Empty document: {file_path.name}")
+                return None
+
+            # Create document metadata
+            document = {
+                "id": file_path.stem,  # Use filename without extension as ID
+                "title": file_path.stem.replace("_", " ").title(),
+                "content": content,
+                "filename": file_path.name,
+                "file_path": str(file_path),
+                "file_size": len(content),
+                "loaded_at": datetime.now().isoformat(),
+                "document_type": "policy_document",
+            }
+
+            # If it's a JSON file, try to extract structured data
+            if file_path.suffix.lower() == ".json":
+                try:
+                    json_data = json.loads(content)
+                    if isinstance(json_data, dict):
+                        # Use JSON content as the text to embed
+                        if "content" in json_data:
+                            document["content"] = json_data["content"]
+                        elif "text" in json_data:
+                            document["content"] = json_data["text"]
+
+                        # Add other JSON fields as metadata
+                        for key, value in json_data.items():
+                            if key not in ["content", "text"] and isinstance(
+                                value, (str, int, float, bool)
+                            ):
+                                document[f"json_{key}"] = value
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, use raw content
+                    pass
+
+            return document
+
         except Exception as e:
-            logger.error(f"Failed to add documents: {str(e)}")
-            raise
-    
+            logger.error(f"Error loading document {file_path}: {str(e)}")
+            return None
+
+    def index_documents(
+        self,
+        documents: List[Dict[str, Any]],
+        batch_size: int = 32,
+        chunk_long_documents: bool = True,
+        max_chunk_length: int = 1000,
+    ) -> Dict[str, Any]:
+        """
+        Index documents in the vector store.
+
+        Args:
+            documents: List of document dictionaries
+            batch_size: Batch size for embedding generation
+            chunk_long_documents: Whether to chunk long documents
+            max_chunk_length: Maximum length for document chunks
+
+        Returns:
+            Indexing results summary
+        """
+        if not self.is_ready:
+            raise RuntimeError("Vector store not ready. Check Qdrant connection.")
+
+        if not documents:
+            raise ValueError("No documents provided for indexing")
+
+        logger.info(f"Starting indexing of {len(documents)} documents")
+        start_time = time.time()
+
+        # Prepare documents for embedding
+        processed_docs = []
+        for doc in documents:
+            if chunk_long_documents and len(doc.get("content", "")) > max_chunk_length:
+                # Split long documents into chunks
+                chunks = self._chunk_document(doc, max_chunk_length)
+                processed_docs.extend(chunks)
+            else:
+                processed_docs.append(doc)
+
+        logger.info(f"Processing {len(processed_docs)} document chunks")
+
+        try:
+            # Use embedding service to embed and store documents
+            embedded_docs = self.embedding_service.embed_documents(
+                documents=processed_docs, text_field="content", store_in_qdrant=True
+            )
+
+            # Track indexed documents
+            for doc in embedded_docs:
+                self.indexed_documents[doc["id"]] = {
+                    "title": doc.get("title", ""),
+                    "document_type": doc.get("document_type", ""),
+                    "indexed_at": datetime.now().isoformat(),
+                    "embedding_model": doc.get("embedding_model", ""),
+                    "chunk_count": 1,
+                }
+
+            # Update chunk counts for chunked documents
+            chunk_counts = {}
+            for doc in embedded_docs:
+                original_id = doc["id"].split("_chunk_")[0]
+                chunk_counts[original_id] = chunk_counts.get(original_id, 0) + 1
+
+            for original_id, count in chunk_counts.items():
+                if original_id in self.indexed_documents:
+                    self.indexed_documents[original_id]["chunk_count"] = count
+
+            processing_time = time.time() - start_time
+
+            # Prepare results summary
+            results = {
+                "success": True,
+                "documents_processed": len(documents),
+                "chunks_created": len(processed_docs),
+                "embeddings_created": len(embedded_docs),
+                "processing_time": processing_time,
+                "documents_per_second": len(embedded_docs) / processing_time,
+                "collection_name": self.collection_name,
+                "embedding_model": self.model_name,
+                "indexed_at": datetime.now().isoformat(),
+            }
+
+            logger.info(f"Indexing completed successfully in {processing_time:.2f}s")
+            logger.info(f"Indexed {len(embedded_docs)} document chunks")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to index documents: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "documents_processed": 0,
+                "processing_time": time.time() - start_time,
+            }
+
+    def _chunk_document(
+        self, document: Dict[str, Any], max_length: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Split a document into smaller chunks.
+
+        Args:
+            document: Document dictionary
+            max_length: Maximum length per chunk
+
+        Returns:
+            List of document chunks
+        """
+        content = document.get("content", "")
+        if len(content) <= max_length:
+            return [document]
+
+        chunks = []
+        words = content.split()
+        current_chunk = []
+        current_length = 0
+        chunk_index = 0
+
+        for word in words:
+            word_length = len(word) + 1  # +1 for space
+
+            if current_length + word_length > max_length and current_chunk:
+                # Create chunk
+                chunk_content = " ".join(current_chunk)
+                chunk_doc = document.copy()
+                chunk_doc["id"] = f"{document['id']}_chunk_{chunk_index}"
+                chunk_doc["content"] = chunk_content
+                chunk_doc["chunk_index"] = chunk_index
+                chunk_doc["is_chunk"] = True
+                chunk_doc["original_document_id"] = document["id"]
+                chunks.append(chunk_doc)
+
+                # Reset for next chunk
+                current_chunk = [word]
+                current_length = word_length
+                chunk_index += 1
+            else:
+                current_chunk.append(word)
+                current_length += word_length
+
+        # Add final chunk
+        if current_chunk:
+            chunk_content = " ".join(current_chunk)
+            chunk_doc = document.copy()
+            chunk_doc["id"] = f"{document['id']}_chunk_{chunk_index}"
+            chunk_doc["content"] = chunk_content
+            chunk_doc["chunk_index"] = chunk_index
+            chunk_doc["is_chunk"] = True
+            chunk_doc["original_document_id"] = document["id"]
+            chunks.append(chunk_doc)
+
+        logger.debug(f"Split document '{document['id']}' into {len(chunks)} chunks")
+        return chunks
+
     def search(
-        self, 
-        query: str, 
+        self,
+        query: str,
         top_k: int = 5,
         score_threshold: float = 0.0,
-        filter_metadata: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+        filter_conditions: Optional[Dict[str, Any]] = None,
+        include_content: bool = True,
+    ) -> Dict[str, Any]:
         """
-        Search for similar documents using text query.
-        
+        Perform semantic search in the vector store.
+
         Args:
-            query: Text query to search for
+            query: Search query text
             top_k: Number of top results to return
             score_threshold: Minimum similarity score threshold
-            filter_metadata: Optional metadata filters
-            
+            filter_conditions: Optional filter conditions
+            include_content: Whether to include full content in results
+
         Returns:
-            List of similar documents with scores
+            Search results with metadata
         """
-        if not self.index or len(self.documents) == 0:
-            logger.warning("Vector store is empty")
-            return []
-        
-        if not query or not query.strip():
+        if not self.is_ready:
+            raise RuntimeError("Vector store not ready. Check Qdrant connection.")
+
+        if not query.strip():
             raise ValueError("Query cannot be empty")
-        
+
+        logger.info(f"Performing semantic search for: '{query[:100]}...'")
+        start_time = time.time()
+
         try:
-            start_time = time.time()
-            
-            # Create query embedding
-            query_embedding = self.embedding_service.embed_text(query.strip())
-            query_vector = query_embedding.reshape(1, -1).astype('float32')
-            
-            # Perform search
-            search_k = min(top_k * 2, len(self.documents))  # Get more results for filtering
-            scores, indices = self.index.search(query_vector, search_k)
-            
-            # Process results
-            results = []
-            for score, idx in zip(scores[0], indices[0]):
-                if idx == -1:  # FAISS returns -1 for invalid results
-                    continue
-                
-                # Convert FAISS inner product score to cosine similarity
-                similarity_score = float(score)
-                
-                if similarity_score < score_threshold:
-                    continue
-                
-                # Get document
-                if idx < len(self.documents):
-                    doc = self.documents[idx].copy()
-                    doc['similarity_score'] = similarity_score
-                    doc['metadata'] = self.document_metadata.get(idx, {})
-                    
-                    # Apply metadata filters
-                    if filter_metadata:
-                        if not self._matches_filter(doc, filter_metadata):
-                            continue
-                    
-                    results.append(doc)
-            
-            # Sort by similarity and limit results
-            results.sort(key=lambda x: x['similarity_score'], reverse=True)
-            results = results[:top_k]
-            
+            # Use embedding service's semantic search
+            search_results = self.embedding_service.semantic_search(
+                query=query,
+                top_k=top_k,
+                score_threshold=score_threshold,
+                filter_conditions=filter_conditions,
+            )
+
             search_time = time.time() - start_time
-            logger.debug(f"Search completed in {search_time:.3f}s, found {len(results)} results")
-            
-            return results
-            
+
+            # Format results
+            formatted_results = []
+            for result in search_results:
+                formatted_result = {
+                    "id": result["id"],
+                    "score": result["score"],
+                    "title": result.get("metadata", {}).get("title", "Unknown"),
+                    "document_type": result.get("metadata", {}).get(
+                        "document_type", "unknown"
+                    ),
+                    "filename": result.get("metadata", {}).get("filename", ""),
+                    "is_chunk": result.get("metadata", {}).get("is_chunk", False),
+                    "chunk_index": result.get("metadata", {}).get("chunk_index"),
+                    "original_document_id": result.get("metadata", {}).get(
+                        "original_document_id"
+                    ),
+                }
+
+                if include_content:
+                    formatted_result["content"] = result.get("text", "")
+                    formatted_result["content_preview"] = (
+                        result.get("text", "")[:200] + "..."
+                        if len(result.get("text", "")) > 200
+                        else result.get("text", "")
+                    )
+
+                # Add all other metadata
+                for key, value in result.get("metadata", {}).items():
+                    if key not in formatted_result:
+                        formatted_result[key] = value
+
+                formatted_results.append(formatted_result)
+
+            # Prepare response
+            response = {
+                "query": query,
+                "results": formatted_results,
+                "total_results": len(formatted_results),
+                "search_time": search_time,
+                "top_k": top_k,
+                "score_threshold": score_threshold,
+                "collection_name": self.collection_name,
+                "searched_at": datetime.now().isoformat(),
+            }
+
+            logger.info(
+                f"Search completed in {search_time:.3f}s, found {len(formatted_results)} results"
+            )
+            return response
+
         except Exception as e:
             logger.error(f"Search failed: {str(e)}")
-            raise
-    
-    def _matches_filter(self, document: Dict[str, Any], filters: Dict[str, Any]) -> bool:
-        """
-        Check if document matches the provided filters.
-        
-        Args:
-            document: Document to check
-            filters: Filter criteria
-            
-        Returns:
-            True if document matches all filters
-        """
-        for key, value in filters.items():
-            if key in document:
-                if document[key] != value:
-                    return False
-            elif key in document.get('metadata', {}):
-                if document['metadata'][key] != value:
-                    return False
-            else:
-                return False  # Filter key not found
-        
-        return True
-    
-    def get_document_by_id(self, doc_id: int) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve a document by its ID.
-        
-        Args:
-            doc_id: Document ID
-            
-        Returns:
-            Document dictionary or None if not found
-        """
-        if 0 <= doc_id < len(self.documents):
-            doc = self.documents[doc_id].copy()
-            doc['metadata'] = self.document_metadata.get(doc_id, {})
-            return doc
-        return None
-    
-    def get_all_documents(self) -> List[Dict[str, Any]]:
-        """
-        Get all documents in the store.
-        
-        Returns:
-            List of all documents
-        """
-        results = []
-        for i, doc in enumerate(self.documents):
-            doc_copy = doc.copy()
-            doc_copy['metadata'] = self.document_metadata.get(i, {})
-            results.append(doc_copy)
-        return results
-    
-    def save_index(self, filename: Optional[str] = None) -> str:
-        """
-        Save the FAISS index and metadata to disk.
-        
-        Args:
-            filename: Optional custom filename
-            
-        Returns:
-            Path where the index was saved
-        """
-        if self.index is None:
-            raise ValueError("No index to save")
-        
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            if filename is None:
-                filename = f"index_{timestamp}"
-            
-            # Save FAISS index
-            index_path = self.storage_path / f"{filename}.faiss"
-            faiss.write_index(self.index, str(index_path))
-            
-            # Save metadata
-            metadata = {
-                'documents': self.documents,
-                'document_metadata': self.document_metadata,
-                'embedding_dim': self.embedding_dim,
-                'index_type': self.index_type,
-                'is_trained': self.is_trained,
-                'created_at': datetime.utcnow().isoformat(),
-                'embedding_model': self.embedding_service.model_name,
-                'total_documents': len(self.documents)
+            return {
+                "query": query,
+                "results": [],
+                "total_results": 0,
+                "error": str(e),
+                "search_time": time.time() - start_time,
             }
-            
-            metadata_path = self.storage_path / f"{filename}_metadata.json"
-            with open(metadata_path, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"Index saved to {index_path}")
-            logger.info(f"Metadata saved to {metadata_path}")
-            
-            return str(index_path)
-            
-        except Exception as e:
-            logger.error(f"Failed to save index: {str(e)}")
-            raise
-    
-    def load_index(self, filename: str) -> None:
+
+    def get_document_by_id(self, document_id: str) -> Optional[Dict[str, Any]]:
         """
-        Load a FAISS index and metadata from disk.
-        
+        Retrieve a specific document by ID.
+
         Args:
-            filename: Name of the index file (without extension)
+            document_id: Document ID to retrieve
+
+        Returns:
+            Document data or None if not found
         """
         try:
-            # Load FAISS index
-            index_path = self.storage_path / f"{filename}.faiss"
-            if not index_path.exists():
-                raise FileNotFoundError(f"Index file not found: {index_path}")
-            
-            self.index = faiss.read_index(str(index_path))
-            
-            # Load metadata
-            metadata_path = self.storage_path / f"{filename}_metadata.json"
-            if metadata_path.exists():
-                with open(metadata_path, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
-                
-                self.documents = metadata.get('documents', [])
-                self.document_metadata = {
-                    int(k): v for k, v in metadata.get('document_metadata', {}).items()
-                }
-                self.is_trained = metadata.get('is_trained', False)
-                
-                # Verify compatibility
-                saved_dim = metadata.get('embedding_dim')
-                if saved_dim and saved_dim != self.embedding_dim:
-                    logger.warning(f"Embedding dimension mismatch: saved={saved_dim}, current={self.embedding_dim}")
-                
-                saved_model = metadata.get('embedding_model')
-                if saved_model and saved_model != self.embedding_service.model_name:
-                    logger.warning(f"Embedding model mismatch: saved={saved_model}, current={self.embedding_service.model_name}")
-            
-            logger.info(f"Successfully loaded index from {index_path}")
-            logger.info(f"Loaded {len(self.documents)} documents")
-            
+            # Search for the specific document
+            results = self.search(
+                query="",  # Empty query to match by ID filter
+                top_k=1,
+                filter_conditions={"id": document_id},
+            )
+
+            if results["results"]:
+                return results["results"][0]
+            else:
+                logger.warning(f"Document not found: {document_id}")
+                return None
+
         except Exception as e:
-            logger.error(f"Failed to load index: {str(e)}")
-            raise
-    
-    def get_stats(self) -> Dict[str, Any]:
+            logger.error(f"Failed to retrieve document {document_id}: {str(e)}")
+            return None
+
+    def get_collection_stats(self) -> Dict[str, Any]:
         """
-        Get statistics about the vector store.
-        
+        Get statistics about the vector store collection.
+
         Returns:
-            Dictionary containing store statistics
+            Collection statistics
         """
-        stats = {
-            'total_documents': len(self.documents),
-            'embedding_dimension': self.embedding_dim,
-            'index_type': self.index_type,
-            'is_trained': self.is_trained,
-            'storage_path': str(self.storage_path),
-            'embedding_model': self.embedding_service.model_name
+        try:
+            # Get Qdrant collection info
+            qdrant_info = self.embedding_service.get_qdrant_collection_info()
+
+            # Get embedding service info
+            model_info = self.embedding_service.get_model_info()
+
+            stats = {
+                "collection_name": self.collection_name,
+                "total_vectors": qdrant_info.get("vectors_count", 0),
+                "indexed_vectors": qdrant_info.get("indexed_vectors_count", 0),
+                "total_points": qdrant_info.get("points_count", 0),
+                "collection_status": qdrant_info.get("status", "unknown"),
+                "embedding_model": model_info.get("model_name", ""),
+                "embedding_dimension": model_info.get("embedding_dimension", 0),
+                "cache_size": model_info.get("cache_size", 0),
+                "indexed_documents_count": len(self.indexed_documents),
+                "qdrant_enabled": model_info.get("qdrant_enabled", False),
+                "last_updated": datetime.now().isoformat(),
+            }
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Failed to get collection stats: {str(e)}")
+            return {"error": str(e)}
+
+    def delete_document(self, document_id: str) -> bool:
+        """
+        Delete a document from the vector store.
+
+        Args:
+            document_id: ID of the document to delete
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Find all chunks of the document
+            point_ids = [document_id]
+
+            # If it's a chunked document, find all chunks
+            if document_id in self.indexed_documents:
+                chunk_count = self.indexed_documents[document_id].get("chunk_count", 1)
+                if chunk_count > 1:
+                    for i in range(chunk_count):
+                        chunk_id = f"{document_id}_chunk_{i}"
+                        point_ids.append(chunk_id)
+
+            # Delete from Qdrant
+            success = self.embedding_service.delete_from_qdrant(point_ids)
+
+            if success:
+                # Remove from local tracking
+                if document_id in self.indexed_documents:
+                    del self.indexed_documents[document_id]
+                logger.info(f"Successfully deleted document: {document_id}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to delete document {document_id}: {str(e)}")
+            return False
+
+    def clear_collection(self) -> bool:
+        """
+        Clear all documents from the collection.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get all point IDs
+            stats = self.get_collection_stats()
+            total_points = stats.get("total_points", 0)
+
+            if total_points == 0:
+                logger.info("Collection is already empty")
+                return True
+
+            # This would require getting all point IDs first
+            # For now, we'll recreate the collection
+            logger.warning(
+                "Collection clearing not implemented. Consider recreating the collection."
+            )
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to clear collection: {str(e)}")
+            return False
+
+    def health_check(self) -> Dict[str, Any]:
+        """
+        Perform health check on the vector store.
+
+        Returns:
+            Health status information
+        """
+        health_status = {
+            "timestamp": datetime.now().isoformat(),
+            "overall_status": "unknown",
+            "checks": {},
         }
-        
-        if self.index:
-            stats['index_size'] = self.index.ntotal
-            stats['index_is_trained'] = self.index.is_trained
-        
-        # Document source distribution
-        source_counts = {}
-        for doc in self.documents:
-            source = doc.get('source', 'unknown')
-            source_counts[source] = source_counts.get(source, 0) + 1
-        stats['source_distribution'] = source_counts
-        
-        return stats
-    
-    def clear(self) -> None:
-        """Clear all documents and reset the index."""
-        self.index = None
-        self.documents.clear()
-        self.document_metadata.clear()
-        self.is_trained = False
-        logger.info("Vector store cleared")
-    
-    def remove_document(self, doc_id: int) -> bool:
-        """
-        Remove a document from the vector store.
-        Note: This is a simplified implementation. For production use,
-        consider rebuilding the index for better performance.
-        
-        Args:
-            doc_id: ID of the document to remove
-            
-        Returns:
-            True if document was removed, False if not found
-        """
+
         try:
-            if doc_id < 0 or doc_id >= len(self.documents):
-                logger.warning(f"Document ID {doc_id} not found")
-                return False
-            
-            # Remove from documents list
-            removed_doc = self.documents.pop(doc_id)
-            self.document_metadata.pop(doc_id, None)
-            
-            # Update IDs for remaining documents
-            for i in range(doc_id, len(self.documents)):
-                self.documents[i]['id'] = i
-                if i + 1 in self.document_metadata:
-                    self.document_metadata[i] = self.document_metadata.pop(i + 1)
-            
-            logger.info(f"Removed document: {removed_doc.get('title', f'ID {doc_id}')}")
-            logger.warning("Index rebuild recommended after document removal")
-            
-            return True
-            
+            # Check embedding service
+            try:
+                test_embedding = self.embedding_service.embed_text("health check")
+                health_status["checks"]["embedding_service"] = {
+                    "status": "healthy",
+                    "embedding_dimension": len(test_embedding),
+                }
+            except Exception as e:
+                health_status["checks"]["embedding_service"] = {
+                    "status": "unhealthy",
+                    "error": str(e),
+                }
+
+            # Check Qdrant connection
+            qdrant_info = self.embedding_service.get_qdrant_collection_info()
+            if "error" in qdrant_info:
+                health_status["checks"]["qdrant"] = {
+                    "status": "unhealthy",
+                    "error": qdrant_info["error"],
+                }
+            else:
+                health_status["checks"]["qdrant"] = {
+                    "status": "healthy",
+                    "vectors_count": qdrant_info.get("vectors_count", 0),
+                }
+
+            # Overall status
+            all_healthy = all(
+                check["status"] == "healthy"
+                for check in health_status["checks"].values()
+            )
+            health_status["overall_status"] = "healthy" if all_healthy else "unhealthy"
+
         except Exception as e:
-            logger.error(f"Failed to remove document {doc_id}: {str(e)}")
-            return False
-    
-    def rebuild_index(self) -> None:
-        """
-        Rebuild the FAISS index from scratch.
-        Useful after removing documents or changing index parameters.
-        """
-        if not self.documents:
-            logger.warning("No documents to rebuild index")
-            return
-        
-        try:
-            logger.info("Rebuilding index from existing documents...")
-            
-            # Extract content from stored documents
-            texts = [doc['content'] for doc in self.documents]
-            
-            # Create new embeddings
-            embeddings_list = self.embedding_service.embed_batch(texts, show_progress=True)
-            embeddings = np.array(embeddings_list).astype('float32')
-            
-            # Create new index
-            self.index = self._create_index(len(embeddings))
-            
-            # Train if needed
-            if self.index_type == "ivf" and len(embeddings) >= 100:
-                logger.info("Training new index...")
-                self.index.train(embeddings)
-                self.is_trained = True
-            
-            # Add all embeddings
-            self.index.add(embeddings)
-            
-            logger.info(f"Successfully rebuilt index with {len(self.documents)} documents")
-            
-        except Exception as e:
-            logger.error(f"Failed to rebuild index: {str(e)}")
-            raise
-    
-    def update_document(self, doc_id: int, updated_content: str) -> bool:
-        """
-        Update a document's content and re-embed it.
-        Note: This requires rebuilding the index for proper functionality.
-        
-        Args:
-            doc_id: ID of the document to update
-            updated_content: New content for the document
-            
-        Returns:
-            True if document was updated, False if not found
-        """
-        try:
-            if doc_id < 0 or doc_id >= len(self.documents):
-                logger.warning(f"Document ID {doc_id} not found")
-                return False
-            
-            # Update document content
-            old_content = self.documents[doc_id]['content']
-            self.documents[doc_id]['content'] = updated_content
-            self.documents[doc_id]['updated_at'] = datetime.utcnow().isoformat()
-            
-            # Update metadata
-            if doc_id in self.document_metadata:
-                self.document_metadata[doc_id]['content_length'] = len(updated_content)
-            
-            logger.info(f"Updated document {doc_id} content")
-            logger.warning("Index rebuild recommended for updated document to take effect in search")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to update document {doc_id}: {str(e)}")
-            return False
-    
-    def search_by_embedding(
-        self,
-        query_embedding: np.ndarray,
-        top_k: int = 5,
-        score_threshold: float = 0.0
-    ) -> List[Dict[str, Any]]:
-        """
-        Search using a pre-computed embedding vector.
-        
-        Args:
-            query_embedding: Pre-computed embedding vector
-            top_k: Number of top results to return
-            score_threshold: Minimum similarity score threshold
-            
-        Returns:
-            List of similar documents with scores
-        """
-        if not self.index or len(self.documents) == 0:
-            logger.warning("Vector store is empty")
-            return []
-        
-        try:
-            start_time = time.time()
-            
-            # Prepare query vector
-            query_vector = query_embedding.reshape(1, -1).astype('float32')
-            
-            # Perform search
-            scores, indices = self.index.search(query_vector, top_k)
-            
-            # Process results
-            results = []
-            for score, idx in zip(scores[0], indices[0]):
-                if idx == -1:  # FAISS returns -1 for invalid results
-                    continue
-                
-                similarity_score = float(score)
-                
-                if similarity_score < score_threshold:
-                    continue
-                
-                if idx < len(self.documents):
-                    doc = self.documents[idx].copy()
-                    doc['similarity_score'] = similarity_score
-                    doc['metadata'] = self.document_metadata.get(idx, {})
-                    results.append(doc)
-            
-            search_time = time.time() - start_time
-            logger.debug(f"Embedding search completed in {search_time:.3f}s")
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Embedding search failed: {str(e)}")
-            raise
+            health_status["overall_status"] = "error"
+            health_status["error"] = str(e)
+
+        return health_status
 
 
-# Utility functions for integration
-def create_vector_store_from_documents(
-    documents: List[Dict[str, Any]],
-    embedding_service,
-    storage_path: str = "./vector_db",
-    index_type: str = "flat"
-) -> VectorStore:
+# Utility function for easy initialization
+def create_vector_store(
+    documents_dir: str,
+    collection_name: str = "policy_documents",
+    qdrant_host: str = "localhost",
+    qdrant_port: int = 6333,
+    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    index_documents: bool = True,
+) -> VectorStoreService:
     """
-    Create and populate a vector store from a list of documents.
-    
+    Create and initialize a vector store with policy documents.
+
     Args:
-        documents: List of document dictionaries
-        embedding_service: Embedding service instance
-        storage_path: Path to store the index
-        index_type: Type of FAISS index to create
-        
-    Returns:
-        Populated VectorStore instance
-    """
-    try:
-        logger.info(f"Creating vector store with {len(documents)} documents")
-        
-        # Create vector store
-        vector_store = VectorStore(
-            embedding_service=embedding_service,
-            storage_path=storage_path,
-            index_type=index_type
-        )
-        
-        # Add documents
-        vector_store.add_documents(documents)
-        
-        # Save the index
-        index_path = vector_store.save_index("policy_documents")
-        logger.info(f"Vector store created and saved to {index_path}")
-        
-        return vector_store
-        
-    except Exception as e:
-        logger.error(f"Failed to create vector store: {str(e)}")
-        raise
+        documents_dir: Directory containing policy documents
+        collection_name: Name for the Qdrant collection
+        qdrant_host: Qdrant server host
+        qdrant_port: Qdrant server port
+        model_name: Sentence transformer model name
+        index_documents: Whether to automatically index documents
 
-
-def load_vector_store(
-    embedding_service,
-    storage_path: str = "./vector_db",
-    index_filename: str = "policy_documents"
-) -> VectorStore:
-    """
-    Load an existing vector store from disk.
-    
-    Args:
-        embedding_service: Embedding service instance
-        storage_path: Path where the index is stored
-        index_filename: Name of the index file to load
-        
     Returns:
-        Loaded VectorStore instance
+        Initialized VectorStoreService
     """
-    try:
-        vector_store = VectorStore(
-            embedding_service=embedding_service,
-            storage_path=storage_path
-        )
-        
-        vector_store.load_index(index_filename)
-        logger.info("Vector store loaded successfully")
-        
-        return vector_store
-        
-    except Exception as e:
-        logger.error(f"Failed to load vector store: {str(e)}")
-        raise
+    logger.info(f"Creating vector store for documents in: {documents_dir}")
+
+    # Initialize vector store
+    vector_store = VectorStoreService(
+        collection_name=collection_name,
+        qdrant_host=qdrant_host,
+        qdrant_port=qdrant_port,
+        model_name=model_name,
+    )
+
+    if index_documents:
+        # Load and index documents
+        documents = vector_store.load_policy_documents(documents_dir)
+        if documents:
+            indexing_results = vector_store.index_documents(documents)
+            logger.info(f"Indexing results: {indexing_results}")
+        else:
+            logger.warning("No documents found to index")
+
+    return vector_store
