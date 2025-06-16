@@ -1,0 +1,1 @@
+"""API routes for hate speech detection system"""

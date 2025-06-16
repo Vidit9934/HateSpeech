@@ -1,0 +1,112 @@
+/* Global Styles */
+.main {
+    padding: 1rem 2rem;
+}
+
+.stApp {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Header Styling */
+.main .block-container h1 {
+    color: #1f1f1f;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #f0f2f6;
+}
+
+/* Input Section */
+.stTextArea textarea {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 16px;
+}
+
+/* Button Styling */
+.stButton button {
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    transition: all 0.3s ease;
+}
+
+.stButton button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Analysis Results */
+.policy-card {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Metrics Styling */
+[data-testid="stMetricValue"] {
+    font-size: 1.8rem !important;
+    color: #0f4c81;
+}
+
+[data-testid="stMetricDelta"] {
+    font-size: 1rem !important;
+    color: #28a745;
+}
+
+/* Alert Styling */
+.stAlert {
+    border-radius: 8px;
+    margin: 1rem 0;
+    border-left-width: 10px !important;
+}
+
+/* Expandable Sections */
+.streamlit-expanderHeader {
+    font-size: 1rem;
+    color: #1f1f1f;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+/* Progress Bar Colors */
+.stProgress > div > div {
+    background-color: #0f4c81;
+}
+
+/* Sidebar Styling */
+.css-1d391kg {
+    padding: 2rem 1rem;
+}
+
+.sidebar .sidebar-content {
+    background: #f8f9fa;
+}
+
+/* Footer */
+footer {
+    border-top: 1px solid #e0e0e0;
+    padding-top: 1rem;
+    margin-top: 2rem;
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+/* Custom Classes */
+.confidence-high { color: #dc3545; }
+.confidence-medium { color: #ffc107; }
+.confidence-low { color: #28a745; }
+
+/* Responsive Design */
+@media screen and (max-width: 768px) {
+    .main {
+        padding: 0.5rem 1rem;
+    }
+    
+    [data-testid="stMetricValue"] {
+        font-size: 1.4rem !important;
+    }
+}
