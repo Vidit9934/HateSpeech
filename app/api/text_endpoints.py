@@ -140,20 +140,24 @@ async def moderate_content(request: ModerationRequest):
         # 6. Get action recommendation
         action = await agents["action"].recommend_action(
             classification_result={
-                "label": str(class_result.label).lower(),  # Convert enum to lowercase string
-                "severity": str(class_result.severity).lower(),  # Convert enum to lowercase string
+                "label": class_result.label.value.lower(),
+                "severity": class_result.severity.value.lower(),
                 "confidence": class_result.confidence
             },
-            reasoning_result=reasoning
+            reasoning_result={
+                # Fix: Access dictionary items correctly
+                "policy_violations": reasoning.get("policy_violations", []),
+                "severity_assessment": reasoning.get("severity_assessment", "")
+            }
         )
 
-        # 7. Create response
+        # Create response
         response = ModerationResponse(
             request_id=str(uuid.uuid4()),
             original_text=request.text,
             platform=Platform.GENERAL,
             classification=class_result,
-            policy_analysis=policy_analysis,  # Use the properly constructed object
+            policy_analysis=policy_analysis,
             recommended_action=ActionRecommendation(**action),
             processing_time_ms=0.0,
             confidence_overall=class_result.confidence,

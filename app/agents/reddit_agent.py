@@ -22,12 +22,16 @@ logger = logging.getLogger("RedditAgent")
 class RedditAgent:
     def __init__(self):
         try:
+            # Initialize Reddit client
             self.reddit = asyncpraw.Reddit(
                 client_id=os.getenv("REDDIT_CLIENT_ID"),
                 client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
                 user_agent=os.getenv("REDDIT_USER_AGENT")
             )
+            # Initialize other agents
             self.retriever = HybridRetrieverAgent()
+            
+            # Action matrix definition
             self.action_matrix = {
                 # Hate Speech Actions
                 ("toxic", "high"): (ModerationAction.IMMEDIATE_REMOVAL, "Severe toxic content detected - immediate removal required"),
@@ -96,8 +100,8 @@ class RedditAgent:
                 ]
                 
                 # Get action from matrix
-                label = str(classification_label).lower()
-                severity_level = str(severity).lower()
+                label = str(classification_label).lower()  # Changed from .value.lower()
+                severity_level = str(severity).lower()     # Changed from .value.lower()
                 
                 action_tuple = self.action_matrix.get(
                     (label, severity_level),  # Try exact match
@@ -105,6 +109,16 @@ class RedditAgent:
                         (label, '*'),  # Try wildcard severity
                         (ModerationAction.HUMAN_REVIEW, "Unable to determine action - human review needed")  # Default
                     )
+                )
+
+                # Use the policy violations and severity assessment in reasoning
+                policy_violations = [p.content for p in formatted_policies if p.relevance_score > 0.7]
+                severity_assessment = (
+                    "High severity content detected"
+                    if severity == Severity.HIGH
+                    else "Medium severity content detected"
+                    if severity == Severity.MEDIUM
+                    else "Low severity content detected"
                 )
 
                 moderation_result = ModerationResponse(
@@ -121,15 +135,15 @@ class RedditAgent:
                     ),
                     policy_analysis=PolicyReasoning(
                         applicable_policies=formatted_policies,
-                        policy_violations=[p.content for p in formatted_policies if p.relevance_score > 0.7],
+                        policy_violations=policy_violations,
                         reasoning_summary=f"Found {len(formatted_policies)} relevant policies with avg match of {avg_relevance:.2%}",
                         policies_analyzed=len(formatted_policies)
                     ),
                     recommended_action=ActionRecommendation(
-                        primary_action=action_tuple[0],
+                        primary_action=action_tuple[0],  # Changed from 'action'
+                        justification=action_tuple[1],   # Changed from 'description'
                         alternative_actions=[],
-                        justification=action_tuple[1],
-                        escalation_needed=action_tuple[0] in [ModerationAction.HUMAN_REVIEW, ModerationAction.IMMEDIATE_REMOVAL],
+                        escalation_needed=action_tuple[0] in [ModerationAction.HUMAN_REVIEW, ModerationAction.IMMEDIATE_REMOVAL, ModerationAction.CONTENT_REMOVAL,ModerationAction.NO_ACTION,ModerationAction.MANUAL_REVIEW],
                         follow_up_actions=[],
                         ban_duration=None
                     ),

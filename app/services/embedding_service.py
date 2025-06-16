@@ -639,71 +639,6 @@ class EmbeddingService:
             logger.error(f"Failed to embed documents: {str(e)}")
             raise
 
-    def compute_similarity(
-        self, embedding1: np.ndarray, embedding2: np.ndarray
-    ) -> float:
-        """
-        Compute cosine similarity between two embeddings.
-
-        Args:
-            embedding1: First embedding vector
-            embedding2: Second embedding vector
-
-        Returns:
-            Cosine similarity score between -1 and 1
-        """
-        try:
-            # Normalize embeddings
-            norm1 = np.linalg.norm(embedding1)
-            norm2 = np.linalg.norm(embedding2)
-
-            if norm1 == 0 or norm2 == 0:
-                return 0.0
-
-            # Compute cosine similarity
-            similarity = np.dot(embedding1, embedding2) / (norm1 * norm2)
-            return float(similarity)
-
-        except Exception as e:
-            logger.error(f"Failed to compute similarity: {str(e)}")
-            return 0.0
-
-    def find_most_similar(
-        self,
-        query_embedding: np.ndarray,
-        document_embeddings: List[np.ndarray],
-        top_k: int = 5,
-    ) -> List[tuple]:
-        """
-        Find most similar documents to a query embedding.
-
-        Args:
-            query_embedding: Query embedding vector
-            document_embeddings: List of document embedding vectors
-            top_k: Number of top results to return
-
-        Returns:
-            List of (index, similarity_score) tuples sorted by similarity
-        """
-        if not document_embeddings:
-            return []
-
-        try:
-            similarities = []
-
-            for i, doc_embedding in enumerate(document_embeddings):
-                similarity = self.compute_similarity(query_embedding, doc_embedding)
-                similarities.append((i, similarity))
-
-            # Sort by similarity (descending)
-            similarities.sort(key=lambda x: x[1], reverse=True)
-
-            # Return top-k results
-            return similarities[:top_k]
-
-        except Exception as e:
-            logger.error(f"Failed to find similar documents: {str(e)}")
-            return []
 
     def semantic_search(
         self,
@@ -825,10 +760,6 @@ class EmbeddingService:
 
         return info
 
-    def clear_cache(self) -> None:
-        """Clear the embedding cache."""
-        self._embedding_cache.clear()
-        logger.info("Embedding cache cleared")
 
     def __del__(self):
         """Cleanup when the service is destroyed."""
@@ -864,42 +795,3 @@ def preprocess_text_for_embedding(text: str) -> str:
 
     return text
 
-
-def chunk_text(text: str, max_length: int = 500, overlap: int = 50) -> List[str]:
-    """
-    Split long text into overlapping chunks for better embedding.
-
-    Args:
-        text: Text to chunk
-        max_length: Maximum length per chunk
-        overlap: Number of characters to overlap between chunks
-
-    Returns:
-        List of text chunks
-    """
-    if len(text) <= max_length:
-        return [text]
-
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        end = start + max_length
-
-        # Try to break at word boundary
-        if end < len(text):
-            # Find last space before the limit
-            last_space = text.rfind(" ", start, end)
-            if last_space > start:
-                end = last_space
-
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-
-        # Move start position with overlap
-        start = end - overlap
-        if start >= len(text):
-            break
-
-    return chunks
