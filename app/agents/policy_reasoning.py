@@ -2,7 +2,7 @@ from langchain_openai import AzureChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from typing import Dict, List, Any
 from app.utils.config import Config
-from app.models.schemas import PolicyReasoning
+from app.models.policy_schema import PolicyReasoning
 import logging
 
 logger = logging.getLogger("PolicyReasoningAgent")

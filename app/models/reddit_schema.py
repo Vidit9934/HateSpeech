@@ -1,7 +1,7 @@
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
 from datetime import datetime
-from .schemas import ModerationResponse
+from .moderation_schema import ModerationResponse
 
 class SubredditRequest(BaseModel):
     """Request to analyze a subreddit's content"""

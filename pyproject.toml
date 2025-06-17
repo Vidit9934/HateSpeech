@@ -8,6 +8,8 @@ dependencies = [
     "black>=25.1.0",
     "langchain-openai>=0.3.19",
     "praw>=7.8.1",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.0.0",
     "qdrant-client>=1.14.2",
     "speechrecognition>=3.14.3",
 ]

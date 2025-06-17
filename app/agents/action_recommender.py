@@ -2,7 +2,7 @@ from langchain_openai import AzureChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from typing import Dict, Any, Union
 from app.utils.config import Config
-from app.models.schemas import ActionRecommendation, ModerationAction, ClassificationLabel, Severity
+from app.models.moderation_schema import ActionRecommendation, ModerationAction
 import logging
 
 # Set up standard logging

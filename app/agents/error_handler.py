@@ -2,18 +2,19 @@ import logging
 from typing import Dict, Any
 from datetime import datetime
 from enum import Enum
+from app.models.base_schema import ErrorType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ErrorHandlerAgent")
 
 
-class ErrorType(Enum):
-    API_ERROR = "api_error"
-    CLASSIFICATION_ERROR = "classification_error"
-    RETRIEVAL_ERROR = "retrieval_error"
-    REASONING_ERROR = "reasoning_error"
-    ACTION_ERROR = "action_error"
-    SYSTEM_ERROR = "system_error"
+# class ErrorType(Enum):
+#     API_ERROR = "api_error"
+#     CLASSIFICATION_ERROR = "classification_error"
+#     RETRIEVAL_ERROR = "retrieval_error"
+#     REASONING_ERROR = "reasoning_error"
+#     ACTION_ERROR = "action_error"
+#     SYSTEM_ERROR = "system_error"
 
 
 class ErrorHandlerAgent:
@@ -22,24 +23,24 @@ class ErrorHandlerAgent:
     def __init__(self):
         # Basic fallback responses for different error types
         self.fallback_responses = {
-            ErrorType.CLASSIFICATION_ERROR: {
+            ErrorType.CLASSIFICATION_ERROR.value: {
                 "classification": "uncertain",
                 "confidence": 0.0,
                 "reason": "Classification failed - human review needed",
             },
-            ErrorType.RETRIEVAL_ERROR: {
+            ErrorType.RETRIEVAL_ERROR.value: {
                 "relevant_policies": [],
                 "message": "Could not retrieve policies - human review needed",
             },
-            ErrorType.REASONING_ERROR: {
+            ErrorType.REASONING_ERROR.value: {
                 "policy_violations": ["Unable to analyze violations"],
                 "message": "Reasoning failed - human review needed",
             },
-            ErrorType.ACTION_ERROR: {
+            ErrorType.ACTION_ERROR.value: {
                 "action": "human_review",
                 "reason": "Action recommendation failed",
             },
-            ErrorType.SYSTEM_ERROR: {
+            ErrorType.SYSTEM_ERROR.value: {
                 "message": "System error occurred",
                 "action": "human_review",
             },

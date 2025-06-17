@@ -5,17 +5,33 @@ from datetime import datetime
 import os
 import uuid
 from app.agents import HybridRetrieverAgent
-from app.models.schemas import (
-    PolicyDocument, 
-    ModerationResponse, 
-    Platform, 
-    ClassificationResult, 
-    ClassificationLabel, 
-    Severity, 
-    ActionRecommendation, 
-    ModerationAction, 
+from app.models.policy_schema import (
+    PolicyDocument,
     PolicyReasoning
 )
+from app.models.base_schema import (
+    ClassificationLabel,
+    Severity,
+    ModerationAction,
+    Platform
+)
+from app.models.moderation_schema import (
+    ClassificationResult,
+    ActionRecommendation,
+    ModerationResponse
+)
+
+# from app.models.__init__ import (
+#     # PolicyDocument, 
+#     # ModerationResponse, 
+#     # Platform, 
+#     # ClassificationResult, 
+#     # ClassificationLabel, 
+#     # Severity, 
+#     # ActionRecommendation, 
+#     # ModerationAction, 
+#     # PolicyReasoning
+# )
 
 logger = logging.getLogger("RedditAgent")
 

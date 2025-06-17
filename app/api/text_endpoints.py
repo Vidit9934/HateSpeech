@@ -10,19 +10,34 @@ from app.agents import (
     PolicyReasoningAgent,
     ActionRecommenderAgent,
     ErrorHandlerAgent,
-    ErrorType
 )
-from app.models.schemas import (
+
+from app.models.policy_schema import (
+    PolicyDocument,
+    PolicyReasoning
+)
+from app.models.base_schema import (
     ClassificationLabel,
     Severity,
-    Platform,
-    ClassificationResult,
-    PolicyReasoning,
-    ActionRecommendation,
-    ModerationRequest,
-    ModerationResponse,
-    PolicyDocument
+    Platform
 )
+from app.models.moderation_schema import (
+    ClassificationResult,
+    ActionRecommendation,
+    ModerationResponse,
+    ModerationRequest
+)
+# from app.models.__init__ import (
+#     ClassificationLabel,
+#     Severity,
+#     Platform,
+#     ClassificationResult,
+#     PolicyReasoning,
+#     ActionRecommendation,
+#     ModerationRequest,
+#     ModerationResponse,
+#     PolicyDocument
+# )
 
 # Configure logging
 logger = logging.getLogger(__name__)
